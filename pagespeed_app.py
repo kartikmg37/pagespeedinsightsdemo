@@ -1,12 +1,7 @@
+import streamlit as st
 import pandas as pd
 import requests
-import openpyxl
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from tkinter import ttk
-import threading
- 
-# --- FUNCTION TO FETCH PAGESPEED DATA ---
+
 def fetch_pagespeed_data(url, strategy, api_key):
     endpoint = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
     params = {
@@ -17,10 +12,10 @@ def fetch_pagespeed_data(url, strategy, api_key):
     try:
         response = requests.get(endpoint, params=params)
         data = response.json()
- 
+
         lighthouse_score = data['lighthouseResult']['categories']['performance']['score'] * 100
         audits = data['lighthouseResult']['audits']
- 
+
         return {
             'URL': url,
             'Performance Score': lighthouse_score,
@@ -38,51 +33,31 @@ def fetch_pagespeed_data(url, strategy, api_key):
             'URL': url,
             'Error': str(e)
         }
- 
-# --- FUNCTION TO PROCESS FILE ---
-def process_file(filepath, api_key, strategy):
+
+st.title("📊 PageSpeed Insights Bulk Checker")
+
+api_key = st.text_input("Enter your Google API Key", type="password")
+strategy = st.selectbox("Select Strategy", ["mobile", "desktop"])
+uploaded_file = st.file_uploader("Upload Excel file with 'URL' column", type="xlsx")
+
+if uploaded_file and api_key:
     try:
-        df = pd.read_excel(filepath, engine='openpyxl')
+        df = pd.read_excel(uploaded_file)
         if 'URL' not in df.columns:
-            raise ValueError("Excel file must contain a column named 'URL'.")
- 
-        urls = df['URL'].dropna().tolist()
-        results = [fetch_pagespeed_data(url, strategy, api_key) for url in urls]
-        result_df = pd.DataFrame(results)
-        output_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[["Excel files", "*.xlsx"]])
-        if output_path:
-            result_df.to_excel(output_path, index=False)
-            messagebox.showinfo("Success", f"PageSpeed report saved to {output_path}")
+            st.error("Excel file must contain a column named 'URL'.")
+        else:
+            urls = df['URL'].dropna().tolist()
+            with st.spinner("Fetching PageSpeed data..."):
+                results = [fetch_pagespeed_data(url, strategy, api_key) for url in urls]
+            result_df = pd.DataFrame(results)
+            st.success("Report generated!")
+
+            st.download_button(
+                label="📥 Download Results as Excel",
+                data=result_df.to_excel(index=False, engine='openpyxl'),
+                file_name="pagespeed_report.xlsx"
+            )
+
+            st.dataframe(result_df)
     except Exception as e:
-        messagebox.showerror("Error", f"Error processing file: {e}")
- 
-# --- GUI ---
-def run_gui():
-    root = tk.Tk()
-    root.title("PageSpeed Insights Bulk Checker")
-    root.geometry("400x300")
- 
-    tk.Label(root, text="Google API Key:").pack(pady=5)
-    api_key_entry = tk.Entry(root, width=50)
-    api_key_entry.pack()
- 
-    tk.Label(root, text="Strategy:").pack(pady=5)
-    strategy_choice = ttk.Combobox(root, values=["mobile", "desktop"])
-    strategy_choice.set("mobile")
-    strategy_choice.pack()
- 
-    def browse_file():
-        filepath = filedialog.askopenfilename(filetypes=[["Excel files", "*.xlsx"]])
-        if filepath:
-            api_key = api_key_entry.get().strip()
-            strategy = strategy_choice.get()
-            if not api_key:
-                messagebox.showerror("Missing API Key", "Please enter your Google API key.")
-                return
-            threading.Thread(target=process_file, args=(filepath, api_key, strategy), daemon=True).start()
- 
-    tk.Button(root, text="Select Excel File & Run", command=browse_file).pack(pady=20)
-    root.mainloop()
- 
-if __name__ == "__main__":
-    run_gui()
+        st.error(f"Error: {e}")
