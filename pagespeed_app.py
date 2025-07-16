@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import io
 
 def fetch_pagespeed_data(url, strategy, api_key):
     endpoint = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
@@ -52,12 +53,19 @@ if uploaded_file and api_key:
             result_df = pd.DataFrame(results)
             st.success("Report generated!")
 
+            # After result_df is generated
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                result_df.to_excel(writer, index=False)
+            output.seek(0)
+            
             st.download_button(
                 label="📥 Download Results as Excel",
-                data=result_df.to_excel(index=False, engine='openpyxl'),
-                file_name="pagespeed_report.xlsx"
+                data=output,
+                file_name="pagespeed_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
+            
             st.dataframe(result_df)
     except Exception as e:
         st.error(f"Error: {e}")
