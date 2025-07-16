@@ -14,6 +14,19 @@ def fetch_pagespeed_data(url, strategy, api_key):
         response = requests.get(endpoint, params=params)
         data = response.json()
 
+        # Check for API errors
+        if 'error' in data:
+            return {
+                'URL': url,
+                'Error': data['error']['message']
+            }
+
+        if 'lighthouseResult' not in data:
+            return {
+                'URL': url,
+                'Error': 'Missing lighthouseResult in response'
+            }
+
         lighthouse_score = data['lighthouseResult']['categories']['performance']['score'] * 100
         audits = data['lighthouseResult']['audits']
 
