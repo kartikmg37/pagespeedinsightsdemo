@@ -1,84 +1,86 @@
 import streamlit as st
 import pandas as pd
 import requests
-import io
+from io import BytesIO
 
 def fetch_pagespeed_data(url, strategy, api_key):
     endpoint = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
     params = {
         'url': url,
-        'key': api_key,
-        'strategy': strategy
+        'strategy': strategy,
+        'key': api_key
     }
+
     try:
         response = requests.get(endpoint, params=params)
+        response.raise_for_status()
         data = response.json()
 
-        # Check for API errors
-        if 'error' in data:
-            return {
-                'URL': url,
-                'Error': data['error']['message']
-            }
-
-        if 'lighthouseResult' not in data:
-            return {
-                'URL': url,
-                'Error': 'Missing lighthouseResult in response'
-            }
-
-        lighthouse_score = data['lighthouseResult']['categories']['performance']['score'] * 100
-        audits = data['lighthouseResult']['audits']
+        lighthouse = data.get("lighthouseResult", {})
+        categories = lighthouse.get("categories", {})
 
         return {
             'URL': url,
-            'Performance Score': lighthouse_score,
-            'FCP': audits.get('first-contentful-paint', {}).get('displayValue', 'N/A'),
-            'LCP': audits.get('largest-contentful-paint', {}).get('displayValue', 'N/A'),
-            'CLS': audits.get('cumulative-layout-shift', {}).get('displayValue', 'N/A'),
-            'INP': audits.get('interactive', {}).get('displayValue', 'N/A'),
-            'Improvement Areas': "; ".join([
-                audit.get("title") for audit in audits.values()
-                if audit.get("score") is not None and audit.get("scoreDisplayMode") == "numeric" and audit.get("score") < 0.9
-            ]) or "None"
+            'Strategy': strategy,
+            'Performance': categories.get('performance', {}).get('score', None),
+            'Accessibility': categories.get('accessibility', {}).get('score', None),
+            'Best Practices': categories.get('best-practices', {}).get('score', None),
+            'SEO': categories.get('seo', {}).get('score', None),
+            'Error': '',
+            'Manual Test': f"https://pagespeed.web.dev/report?url={url}"
         }
+
     except Exception as e:
         return {
             'URL': url,
-            'Error': str(e)
+            'Strategy': strategy,
+            'Performance': None,
+            'Accessibility': None,
+            'Best Practices': None,
+            'SEO': None,
+            'Error': str(e),
+            'Manual Test': f"https://pagespeed.web.dev/report?url={url}"
         }
 
-st.title("📊 PageSpeed Insights Bulk Checker")
+# --- STREAMLIT UI ---
+st.set_page_config(page_title="PageSpeed Report Tool", layout="centered")
+st.title("📊 Google PageSpeed Insights Report Tool")
 
-api_key = st.text_input("Enter your Google API Key", type="password")
-strategy = st.selectbox("Select Strategy", ["mobile", "desktop"])
-uploaded_file = st.file_uploader("Upload Excel file with 'URL' column", type="xlsx")
+api_key = st.text_input("🔐 Enter your Google API Key", type="password")
+uploaded_file = st.file_uploader("📄 Upload Excel file with URLs", type=["xlsx"])
+strategy = st.selectbox("📱 Select Strategy", ["Mobile", "Desktop"])
 
-if uploaded_file and api_key:
-    try:
-        df = pd.read_excel(uploaded_file)
-        if 'URL' not in df.columns:
-            st.error("Excel file must contain a column named 'URL'.")
-        else:
-            urls = df['URL'].dropna().tolist()
-            with st.spinner("Fetching PageSpeed data..."):
-                results = [fetch_pagespeed_data(url, strategy, api_key) for url in urls]
-            result_df = pd.DataFrame(results)
-            st.success("Report generated!")
+if st.button("⚡ Fetch Reports"):
+    if not uploaded_file or not api_key.strip():
+        st.error("Please upload a valid Excel file and enter an API key.")
+    else:
+        try:
+            url_df = pd.read_excel(uploaded_file)
+            if url_df.shape[1] == 0:
+                st.error("Excel file is empty.")
+            else:
+                url_column = url_df.columns[0]  # Use first column as URL column
+                urls = url_df[url_column].dropna().astype(str).tolist()
 
-            # After result_df is generated
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                result_df.to_excel(writer, index=False)
-            output.seek(0)
-            
-            st.download_button(
-                label="📥 Download Results as Excel",
-                data=output,
-                file_name="pagespeed_report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-            st.dataframe(result_df)
-    except Exception as e:
-        st.error(f"Error: {e}")
+                results = []
+                with st.spinner("Fetching data..."):
+                    for url in urls:
+                        result = fetch_pagespeed_data(url.strip(), strategy.lower(), api_key)
+                        results.append(result)
+
+                df = pd.DataFrame(results)
+                df.fillna("N/A", inplace=True)
+
+                st.success("✅ Report generated!")
+                st.dataframe(df)
+
+                output = BytesIO()
+                df.to_excel(output, index=False, engine='openpyxl')
+                st.download_button(
+                    label="📥 Download Excel Report",
+                    data=output.getvalue(),
+                    file_name="pagespeed_report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        except Exception as e:
+            st.error(f"Failed to process file: {str(e)}")
